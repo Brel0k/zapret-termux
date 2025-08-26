@@ -1,55 +1,50 @@
 #!/bin/sh
 
-set -e
+set -e  
 
 install_dependencies() {
     kernel="$(uname -s)"
 
     if [ "$kernel" = "Linux" ]; then
         # Проверка на Termux
-        if [ -n "$TERMUX_VERSION" ]; then
-            echo "Обнаружен Termux, установка зависимостей..."
+        if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ -x "$PREFIX/bin/pkg" ]; then
+            echo "Обнаружен Termux (Android)"
             pkg update -y && pkg install -y git bash
-        elif [ -f /etc/os-release ]; then
-            . /etc/os-release || { echo "Не удалось определить ОС"; exit 1; }
+            return
+        fi
 
-            SUDO="${SUDO:-}"
+        [ -f /etc/os-release ] && . /etc/os-release || { echo "Не удалось определить ОС"; exit 1; }
 
-            find_package_manager() {
-                case "$1" in
-                    arch|artix|cachyos|endeavouros|manjaro|garuda) echo "$SUDO pacman -Syu --noconfirm && $SUDO pacman -S --noconfirm --needed git" ;;
-                    debian|ubuntu|mint) echo "$SUDO apt update -y && $SUDO apt install -y git" ;;
-                    fedora|almalinux|rocky) echo "$SUDO dnf check-update -y && $SUDO dnf install -y git" ;;
-                    void) echo "$SUDO xbps-install -S && $SUDO xbps-install -y git" ;;
-                    gentoo) echo "$SUDO emerge --sync --quiet && $SUDO emerge --ask=n dev-vcs/git app-shells/bash" ;;
-                    opensuse) echo "$SUDO zypper refresh && $SUDO zypper install git" ;;
-                    openwrt) echo "$SUDO opkg update && $SUDO opkg install git git-http bash" ;;
-                    altlinux) echo "$SUDO apt-get update -y && $SUDO apt-get install -y git bash" ;;
-                    alpine) echo "$SUDO apk update && $SUDO apk add git bash" ;;
-                    *) echo "" ;;
-                esac
-            }
+        SUDO="${SUDO:-}"
 
-            install_cmd="$(find_package_manager "$ID")"
-            if [ -z "$install_cmd" ] && [ -n "$ID_LIKE" ]; then
-                for like in $ID_LIKE; do
-                    install_cmd="$(find_package_manager "$like")" && [ -n "$install_cmd" ] && break
-                done
-            fi
+        find_package_manager() {
+            case "$1" in
+                arch|artix|cachyos|endeavouros|manjaro|garuda) echo "$SUDO pacman -Syu --noconfirm && $SUDO pacman -S --noconfirm --needed git" ;;
+                debian|ubuntu|mint) echo "$SUDO apt update -y && $SUDO apt install -y git" ;;
+                fedora|almalinux|rocky) echo "$SUDO dnf check-update -y && $SUDO dnf install -y git" ;;
+                void)      echo "$SUDO xbps-install -S && $SUDO xbps-install -y git" ;;
+                gentoo)    echo "$SUDO emerge --sync --quiet && $SUDO emerge --ask=n dev-vcs/git app-shells/bash" ;;
+                opensuse)  echo "$SUDO zypper refresh && $SUDO zypper install git" ;;
+                openwrt)   echo "$SUDO opkg update && $SUDO opkg install git git-http bash" ;;
+                altlinux)  echo "$SUDO apt-get update -y && $SUDO apt-get install -y git bash" ;;
+                alpine)    echo "$SUDO apk update && $SUDO apk add git bash" ;;
+                *)         echo "" ;;
+            esac
+        }
 
-            if [ -n "$install_cmd" ]; then
-                eval "$install_cmd"
-            else
-                echo "Неизвестная ОС: ${ID:-Неизвестно}"
-                echo "Установите git и bash самостоятельно."
-                sleep 2
-                exit 1
-            fi
+        install_cmd="$(find_package_manager "$ID")"
+        if [ -z "$install_cmd" ] && [ -n "$ID_LIKE" ]; then
+            for like in $ID_LIKE; do
+                install_cmd="$(find_package_manager "$like")" && [ -n "$install_cmd" ] && break
+            done
+        fi
+
+        if [ -n "$install_cmd" ]; then
+            eval "$install_cmd"
         else
-            echo "Не удалось определить ОС, файл /etc/os-release отсутствует."
+            echo "Неизвестная ОС: ${ID:-Неизвестно}"
             echo "Установите git и bash самостоятельно."
             sleep 2
-            exit 1
         fi
     elif [ "$kernel" = "Darwin" ]; then
         echo "macOS не поддерживается на данный момент."
@@ -58,26 +53,25 @@ install_dependencies() {
         echo "Неизвестная ОС: $kernel"
         echo "Установите git и bash самостоятельно."
         sleep 2
-        exit 1
     fi
 }
 
-# Проверка на файловую систему только для чтения
-if [ "$(awk '$2 == "/" {print $4}' /proc/mounts)" = "ro" ]; then
-    echo "Файловая система только для чтения, не могу продолжать."
-    exit 1
+# Проверка root FS только если не Termux
+if ! { [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; }; then
+    if [ "$(awk '$2 == "/" {print $4}' /proc/mounts)" = "ro" ]; then
+        echo "Файловая система только для чтения, не могу продолжать."
+        exit 1
+    fi
 fi
 
-# Проверка на Termux или root-доступ
-if [ -n "$TERMUX_VERSION" ]; then
-    SUDO=""
+# Определение SUDO (не нужно в Termux)
+if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
+    SUDO=""  # Termux всегда без root
 else
     if [ "$(id -u)" -eq 0 ]; then
         SUDO=""
     else
-        if command -v tsu > /dev/null 2>&1; then
-            SUDO="tsu"
-        elif command -v sudo > /dev/null 2>&1; then
+        if command -v sudo > /dev/null 2>&1; then
             SUDO="sudo"
         elif command -v doas > /dev/null 2>&1; then
             SUDO="doas"
@@ -88,19 +82,17 @@ else
     fi
 fi
 
-# Установка git, если не установлен
 if ! command -v git > /dev/null 2>&1; then
     install_dependencies
 fi
 
-# Определение пути для Termux или стандартной системы
-if [ -n "$TERMUX_VERSION" ]; then
-    INSTALL_DIR="$PREFIX/opt/zapret.installer"
+# В Termux ставим в $HOME, в Linux — в /opt
+if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
+    INSTALL_DIR="$HOME/zapret.installer"
 else
     INSTALL_DIR="/opt/zapret.installer"
 fi
 
-# Клонирование или обновление репозитория
 if [ ! -d "$INSTALL_DIR" ]; then
     $SUDO git clone https://github.com/Snowy-Fluffy/zapret.installer.git "$INSTALL_DIR"
 else
@@ -112,13 +104,5 @@ else
     fi
 fi
 
-# Исправление путей в zapret-control.sh для Termux
-if [ -n "$TERMUX_VERSION" ]; then
-    sed -i 's|/opt/zapret.installer/files/|$PREFIX/opt/zapret.installer/files/|g' "$INSTALL_DIR/zapret-control.sh"
-fi
-
-# Установка прав на выполнение
 $SUDO chmod +x "$INSTALL_DIR/zapret-control.sh"
-
-# Запуск скрипта
 exec bash "$INSTALL_DIR/zapret-control.sh"
