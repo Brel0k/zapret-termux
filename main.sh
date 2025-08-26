@@ -1,10 +1,14 @@
 #!/bin/sh
-
 set -e  
 
 # --- Fix PATH for Termux ---
 if [ -d "/data/data/com.termux/files/usr/bin" ]; then
     export PATH="/data/data/com.termux/files/usr/bin:/data/data/com.termux/files/usr/bin/applets:$PATH"
+    GIT="/data/data/com.termux/files/usr/bin/git"
+    BASH="/data/data/com.termux/files/usr/bin/bash"
+else
+    GIT="$(command -v git || echo git)"
+    BASH="$(command -v bash || echo bash)"
 fi
 
 install_dependencies() {
@@ -94,7 +98,7 @@ else
     fi
 fi
 
-if ! command -v git > /dev/null 2>&1; then
+if ! command -v "$GIT" > /dev/null 2>&1; then
     install_dependencies
 fi
 
@@ -106,13 +110,13 @@ else
 fi
 
 if [ ! -d "$INSTALL_DIR" ]; then
-    $SUDO git clone https://github.com/Snowy-Fluffy/zapret.installer.git "$INSTALL_DIR"
+    $SUDO "$GIT" clone https://github.com/Snowy-Fluffy/zapret.installer.git "$INSTALL_DIR"
 else
     cd "$INSTALL_DIR" || exit
-    if ! $SUDO git pull; then
+    if ! $SUDO "$GIT" pull; then
         echo "Ошибка при обновлении. Удаляю репозиторий и клонирую заново..."
         $SUDO rm -rf "$INSTALL_DIR"
-        $SUDO git clone https://github.com/Snowy-Fluffy/zapret.installer.git "$INSTALL_DIR"
+        $SUDO "$GIT" clone https://github.com/Snowy-Fluffy/zapret.installer.git "$INSTALL_DIR"
     fi
 fi
 
@@ -120,4 +124,4 @@ fi
 find "$INSTALL_DIR" -type f -exec sed -i "s|/opt/zapret.installer|$INSTALL_DIR|g" {} +
 
 $SUDO chmod +x "$INSTALL_DIR/zapret-control.sh"
-exec bash "$INSTALL_DIR/zapret-control.sh"
+exec "$BASH" "$INSTALL_DIR/zapret-control.sh"
