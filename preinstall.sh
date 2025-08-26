@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Безопасность: включаем строгую проверку ошибок
+set -euo pipefail
+
 # Функция для установки wget и git в Termux
 install_with_pkg() {
   echo "Обнаружен Termux, устанавливаем wget и git..."
@@ -20,9 +23,9 @@ else
   fi
 fi
 
-# Создаем временную директорию, если она не существует
+# Создаем временную директорию
 mkdir -p "$HOME/tmp"
-# Очистка временной директории с защитой от ошибок
+# Безопасная очистка временной директории
 rm -rf "$HOME/tmp/*" 2>/dev/null || true
 
 # Бэкап zapret, если он существует
@@ -88,8 +91,8 @@ fi
 
 echo "Найден распакованный каталог: $ZAPRET_EXTRACT_DIR"
 
-# Создание директории $HOME/opt, если она не существует
-mkdir -p "$HOME/opt"
+# Создание директорий для zapret
+mkdir -p "$HOME/opt/zapret/config" "$HOME/opt/zapret/hostlists"
 
 # Перемещение zapret в $HOME/opt/zapret
 echo "Перемещение zapret в $HOME/opt/zapret..."
@@ -110,42 +113,72 @@ fi
 
 # Копирование hostlists
 echo "Копирование hostlists..."
-mkdir -p "$HOME/opt/zapret/hostlists"
 if ! cp -r "$HOME/zapret-configs/hostlists" "$HOME/opt/zapret/"; then
   echo "Ошибка: не удалось скопировать hostlists."
   exit 1
 fi
 
-# Создание директории для конфига
-mkdir -p "$HOME/opt/zapret/config"
+# Проверка наличия файла general
+if [ ! -f "$HOME/zapret-configs/general" ]; then
+  echo "Предупреждение: файл general не найден в $HOME/zapret-configs."
+  echo "Проверьте репозиторий https://github.com/kartavkun/zapret-discord-youtube."
+fi
 
-# Попытка исправить install.sh перед запуском
-echo "Проверка и исправление install.sh для Termux..."
-if [ -f "$HOME/zapret-configs/install.sh" ]; then
-  # Заменяем /opt/zapret на $HOME/opt/zapret в install.sh
-  sed -i "s|/opt/zapret|$HOME/opt/zapret|g" "$HOME/zapret-configs/install.sh"
-  # Делаем скрипт исполняемым
-  chmod +x "$HOME/zapret-configs/install.sh"
-else
+# Проверка наличия install.sh и install_easy.sh
+echo "Проверка наличия скриптов install.sh и install_easy.sh..."
+if [ ! -f "$HOME/zapret-configs/install.sh" ]; then
   echo "Ошибка: файл install.sh не найден в $HOME/zapret-configs."
   exit 1
 fi
+if [ ! -f "$HOME/zapret-configs/install_easy.sh" ]; then
+  echo "Ошибка: файл install_easy.sh не найден в $HOME/zapret-configs."
+  exit 1
+fi
 
-# Пропускаем настройку IP forwarding и других системных параметров, так как они требуют root
-echo "Пропуск настройки системных параметров (например, IP forwarding), так как они требуют root-доступа."
+# Проверка наличия fixfilecontext.sh
+if [ ! -f "$HOME/zapret-configs/module/fixfilecontext.sh" ]; then
+  echo "Предупреждение: файл module/fixfilecontext.sh не найден. Пропускаем SELinux-настройки."
+  # Комментируем вызов fixfilecontext.sh в install.sh
+  sed -i 's|.*fixfilecontext.sh.*|# &|' "$HOME/zapret-configs/install.sh"
+else
+  chmod +x "$HOME/zapret-configs/module/fixfilecontext.sh"
+fi
 
-# Запуск install.sh с обработкой ошибок
+# Попытка исправить install.sh и install_easy.sh
+echo "Исправление скриптов для Termux..."
+# Заменяем /opt/zapret на $HOME/opt/zapret
+sed -i "s|/opt/zapret|$HOME/opt/zapret|g" "$HOME/zapret-configs/install.sh"
+sed -i "s|/opt/zapret|$HOME/opt/zapret|g" "$HOME/zapret-configs/install_easy.sh" 2>/dev/null || true
+# Комментируем команды, требующие root (iptables, nftables, systemctl, sysctl)
+sed -i 's/^\( *\)\(iptables\|nftables\|systemctl\|sysctl\|chcon\)/\1# \2/' "$HOME/zapret-configs/install.sh"
+sed -i 's/^\( *\)\(iptables\|nftables\|systemctl\|sysctl\|chcon\)/\1# \2/' "$HOME/zapret-configs/install_easy.sh" 2>/dev/null || true
+# Делаем скрипты исполняемыми
+chmod +x "$HOME/zapret-configs/install.sh"
+chmod +x "$HOME/zapret-configs/install_easy.sh" 2>/dev/null || true
+
+# Проверка наличия superuser binary
+if ! command -v su &>/dev/null; then
+  echo "Предупреждение: superuser binary (su) не найден. Termux не имеет root-доступа."
+  echo "Некоторые функции zapret могут не работать без root (например, настройка iptables)."
+fi
+
+# Запуск install.sh с отладкой
 echo "Запуск install.sh..."
-if ! bash "$HOME/zapret-configs/install.sh"; then
+if ! bash -x "$HOME/zapret-configs/install.sh" 2>&1; then
   echo "Ошибка: не удалось запустить install.sh."
   echo "Возможные причины:"
-  echo "- Скрипт install.sh содержит команды, требующие root-доступа (например, iptables, nftables, systemctl)."
+  echo "- Отсутствует файл module/fixfilecontext.sh или другие зависимости."
+  echo "- Скрипт содержит команды, требующие root-доступа."
   echo "- Неправильные пути или отсутствующие файлы."
   echo "Рекомендации:"
-  echo "1. Проверьте содержимое $HOME/zapret-configs/install.sh."
-  echo "2. Убедитесь, что все зависимости установлены (например, pkg install iptables если требуется)."
-  echo "3. Если у вас есть root-доступ, установите 'tsu' (pkg install tsu) и попробуйте снова."
-  echo "4. Вручную замените пути в install.sh, если они используют /opt/zapret."
+  echo "1. Проверьте содержимое install.sh:"
+  echo "   cat $HOME/zapret-configs/install.sh"
+  echo "2. Проверьте наличие install_easy.sh и general:"
+  echo "   ls -la $HOME/zapret-configs/install_easy.sh $HOME/zapret-configs/general"
+  echo "3. Запустите install.sh с отладкой вручную:"
+  echo "   bash -x $HOME/zapret-configs/install.sh"
+  echo "4. Если требуется root, установите 'tsu' (pkg install tsu) на rooted-устройстве."
+  echo "5. Проверьте репозиторий https://github.com/kartavkun/zapret-discord-youtube."
   exit 1
 fi
 
