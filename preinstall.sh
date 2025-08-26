@@ -12,7 +12,6 @@ if command -v pkg &>/dev/null; then
   install_with_pkg
 else
   echo "Не удалось определить пакетный менеджер Termux (pkg)."
-  # Проверяем, установлены ли wget и git
   if command -v wget &>/dev/null && command -v git &>/dev/null; then
     echo "wget и git уже установлены, продолжаем..."
   else
@@ -23,15 +22,17 @@ fi
 
 # Создаем временную директорию, если она не существует
 mkdir -p "$HOME/tmp"
-# Очистка временной директории
-rm -rf "$HOME/tmp/*"
+# Очистка временной директории с защитой от ошибок
+rm -rf "$HOME/tmp/*" 2>/dev/null || true
 
 # Бэкап zapret, если он существует
 if [ -d "$HOME/opt/zapret" ]; then
   echo "Создание резервной копии существующего zapret..."
-  cp -r "$HOME/opt/zapret" "$HOME/opt/zapret.bak"
+  cp -r "$HOME/opt/zapret" "$HOME/opt/zapret.bak" 2>/dev/null || {
+    echo "Предупреждение: не удалось создать резервную копию zapret."
+  }
 fi
-rm -rf "$HOME/opt/zapret"
+rm -rf "$HOME/opt/zapret" 2>/dev/null || true
 
 # Получение последней версии zapret с GitHub API
 echo "Определение последней версии zapret..."
@@ -100,7 +101,7 @@ fi
 # Клонирование репозитория с конфигами
 echo "Клонирование репозитория с конфигами..."
 if ! git clone https://github.com/kartavkun/zapret-discord-youtube.git "$HOME/zapret-configs"; then
-  rm -rf "$HOME/zapret-configs"
+  rm -rf "$HOME/zapret-configs" 2>/dev/null
   if ! git clone https://github.com/kartavkun/zapret-discord-youtube.git "$HOME/zapret-configs"; then
     echo "Ошибка: не удалось клонировать репозиторий с конфигами."
     exit 1
@@ -109,18 +110,42 @@ fi
 
 # Копирование hostlists
 echo "Копирование hostlists..."
-if ! cp -r "$HOME/zapret-configs/hostlists" "$HOME/opt/zapret/hostlists"; then
+mkdir -p "$HOME/opt/zapret/hostlists"
+if ! cp -r "$HOME/zapret-configs/hostlists" "$HOME/opt/zapret/"; then
   echo "Ошибка: не удалось скопировать hostlists."
   exit 1
 fi
 
-# Пропускаем настройку IP forwarding, так как она не применима в Termux без root
-echo "Пропуск настройки IP forwarding, так как она требует root-доступа и не поддерживается в Termux."
+# Создание директории для конфига
+mkdir -p "$HOME/opt/zapret/config"
 
-# Запуск второго скрипта
+# Попытка исправить install.sh перед запуском
+echo "Проверка и исправление install.sh для Termux..."
+if [ -f "$HOME/zapret-configs/install.sh" ]; then
+  # Заменяем /opt/zapret на $HOME/opt/zapret в install.sh
+  sed -i "s|/opt/zapret|$HOME/opt/zapret|g" "$HOME/zapret-configs/install.sh"
+  # Делаем скрипт исполняемым
+  chmod +x "$HOME/zapret-configs/install.sh"
+else
+  echo "Ошибка: файл install.sh не найден в $HOME/zapret-configs."
+  exit 1
+fi
+
+# Пропускаем настройку IP forwarding и других системных параметров, так как они требуют root
+echo "Пропуск настройки системных параметров (например, IP forwarding), так как они требуют root-доступа."
+
+# Запуск install.sh с обработкой ошибок
 echo "Запуск install.sh..."
 if ! bash "$HOME/zapret-configs/install.sh"; then
   echo "Ошибка: не удалось запустить install.sh."
+  echo "Возможные причины:"
+  echo "- Скрипт install.sh содержит команды, требующие root-доступа (например, iptables, nftables, systemctl)."
+  echo "- Неправильные пути или отсутствующие файлы."
+  echo "Рекомендации:"
+  echo "1. Проверьте содержимое $HOME/zapret-configs/install.sh."
+  echo "2. Убедитесь, что все зависимости установлены (например, pkg install iptables если требуется)."
+  echo "3. Если у вас есть root-доступ, установите 'tsu' (pkg install tsu) и попробуйте снова."
+  echo "4. Вручную замените пути в install.sh, если они используют /opt/zapret."
   exit 1
 fi
 
