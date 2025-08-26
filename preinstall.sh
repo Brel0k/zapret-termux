@@ -20,7 +20,6 @@ if [ ! -d "$INSTALL_DIR" ]; then
     $GIT clone https://github.com/Brel0k/zapret-termux.git "$INSTALL_DIR"
 else
     cd "$INSTALL_DIR" || exit
-    # Pull только если не root, иначе меняем владельца
     if [ "$(id -u)" -ne 0 ]; then
         $GIT pull || echo "Ошибка обновления, продолжаем..."
     else
@@ -33,7 +32,7 @@ cd "$INSTALL_DIR" || exit
 # --- Даем права на исполнение ---
 chmod +x main.sh
 
-# --- Патчим все скрипты (исключая .git), заменяем /opt/... → INSTALL_DIR ---
+# --- Патчим все скрипты (исключая .git) ---
 find "$INSTALL_DIR" -type f ! -path "*/.git/*" -exec $SED -i "s|/opt/zapret.installer|$INSTALL_DIR|g" {} +
 
 # --- Запуск main.sh через Termux bash ---
