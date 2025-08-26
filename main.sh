@@ -96,10 +96,6 @@ fi
 # В Termux ставим в $HOME, в Linux — в /opt
 if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
     INSTALL_DIR="$HOME/zapret.installer"
-    # Делаем симлинк для совместимости
-    if [ ! -e "/opt/zapret.installer" ]; then
-        $SUDO "mkdir -p /opt && ln -s $INSTALL_DIR /opt/zapret.installer"
-    fi
 else
     INSTALL_DIR="/opt/zapret.installer"
 fi
@@ -114,6 +110,9 @@ else
         $SUDO git clone https://github.com/Snowy-Fluffy/zapret.installer.git "$INSTALL_DIR"
     fi
 fi
+
+# Патчим все скрипты: заменяем /opt/zapret.installer → $INSTALL_DIR
+find "$INSTALL_DIR" -type f -exec sed -i "s|/opt/zapret.installer|$INSTALL_DIR|g" {} +
 
 $SUDO chmod +x "$INSTALL_DIR/zapret-control.sh"
 exec bash "$INSTALL_DIR/zapret-control.sh"
