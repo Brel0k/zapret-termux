@@ -2,6 +2,11 @@
 
 set -e  
 
+# --- Fix PATH for Termux ---
+if [ -d "/data/data/com.termux/files/usr/bin" ]; then
+    export PATH="/data/data/com.termux/files/usr/bin:/data/data/com.termux/files/usr/bin/applets:$PATH"
+fi
+
 install_dependencies() {
     kernel="$(uname -s)"
 
@@ -66,7 +71,7 @@ fi
 
 # Определение SUDO
 if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
-    # Termux: сначала пробуем su
+    # Termux: используем su, если доступен
     if command -v su > /dev/null 2>&1; then
         SUDO="su -c"
     else
