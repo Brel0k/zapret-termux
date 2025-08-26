@@ -3,114 +3,118 @@
 set -e
 
 install_dependencies() {
-  kernel="$(uname -s)"
+    kernel="$(uname -s)"
 
-  if [ "$kernel" = "Linux" ]; then
-    # Проверка на Termux
-    if [ -n "$TERMUX_VERSION" ]; then
-      echo "Обнаружен Termux, установка зависимостей..."
-      pkg update -y && pkg install -y git bash
-    elif [ -f /etc/os-release ]; then
-      . /etc/os-release || {
-        echo "Не удалось определить ОС"
+    if [ "$kernel" = "Linux" ]; then
+        # Проверка на Termux
+        if [ -n "$TERMUX_VERSION" ]; then
+            echo "Обнаружен Termux, установка зависимостей..."
+            pkg update -y && pkg install -y git bash
+        elif [ -f /etc/os-release ]; then
+            . /etc/os-release || { echo "Не удалось определить ОС"; exit 1; }
+
+            SUDO="${SUDO:-}"
+
+            find_package_manager() {
+                case "$1" in
+                    arch|artix|cachyos|endeavouros|manjaro|garuda) echo "$SUDO pacman -Syu --noconfirm && $SUDO pacman -S --noconfirm --needed git" ;;
+                    debian|ubuntu|mint) echo "$SUDO apt update -y && $SUDO apt install -y git" ;;
+                    fedora|almalinux|rocky) echo "$SUDO dnf check-update -y && $SUDO dnf install -y git" ;;
+                    void) echo "$SUDO xbps-install -S && $SUDO xbps-install -y git" ;;
+                    gentoo) echo "$SUDO emerge --sync --quiet && $SUDO emerge --ask=n dev-vcs/git app-shells/bash" ;;
+                    opensuse) echo "$SUDO zypper refresh && $SUDO zypper install git" ;;
+                    openwrt) echo "$SUDO opkg update && $SUDO opkg install git git-http bash" ;;
+                    altlinux) echo "$SUDO apt-get update -y && $SUDO apt-get install -y git bash" ;;
+                    alpine) echo "$SUDO apk update && $SUDO apk add git bash" ;;
+                    *) echo "" ;;
+                esac
+            }
+
+            install_cmd="$(find_package_manager "$ID")"
+            if [ -z "$install_cmd" ] && [ -n "$ID_LIKE" ]; then
+                for like in $ID_LIKE; do
+                    install_cmd="$(find_package_manager "$like")" && [ -n "$install_cmd" ] && break
+                done
+            fi
+
+            if [ -n "$install_cmd" ]; then
+                eval "$install_cmd"
+            else
+                echo "Неизвестная ОС: ${ID:-Неизвестно}"
+                echo "Установите git и bash самостоятельно."
+                sleep 2
+                exit 1
+            fi
+        else
+            echo "Не удалось определить ОС, файл /etc/os-release отсутствует."
+            echo "Установите git и bash самостоятельно."
+            sleep 2
+            exit 1
+        fi
+    elif [ "$kernel" = "Darwin" ]; then
+        echo "macOS не поддерживается на данный момент."
         exit 1
-      }
-
-      SUDO="${SUDO:-}"
-
-      find_package_manager() {
-        case "$1" in
-        arch | artix | cachyos | endeavouros | manjaro | garuda) echo "$SUDO pacman -Syu --noconfirm && $SUDO pacman -S --noconfirm --needed git" ;;
-        debian | ubuntu | mint) echo "$SUDO apt update -y && $SUDO apt install -y git" ;;
-        fedora | almalinux | rocky) echo "$SUDO dnf check-update -y && $SUDO dnf install -y git" ;;
-        void) echo "$SUDO xbps-install -S && $SUDO xbps-install -y git" ;;
-        gentoo) echo "$SUDO emerge --sync --quiet && $SUDO emerge --ask=n dev-vcs/git app-shells/bash" ;;
-        opensuse) echo "$SUDO zypper refresh && $SUDO zypper install git" ;;
-        openwrt) echo "$SUDO opkg update && $SUDO opkg install git git-http bash" ;;
-        altlinux) echo "$SUDO apt-get update -y && $SUDO apt-get install -y git bash" ;;
-        alpine) echo "$SUDO apk update && $SUDO apk add git bash" ;;
-        *) echo "" ;;
-        esac
-      }
-
-      install_cmd="$(find_package_manager "$ID")"
-      if [ -z "$install_cmd" ] && [ -n "$ID_LIKE" ]; then
-        for like in $ID_LIKE; do
-          install_cmd="$(find_package_manager "$like")" && [ -n "$install_cmd" ] && break
-        done
-      fi
-
-      if [ -n "$install_cmd" ]; then
-        eval "$install_cmd"
-      else
-        echo "Неизвестная ОС: ${ID:-Неизвестно}"
+    else
+        echo "Неизвестная ОС: $kernel"
         echo "Установите git и bash самостоятельно."
         sleep 2
         exit 1
-      fi
-    else
-      echo "Не удалось определить ОС, файл /etc/os-release отсутствует."
-      echo "Установите git и bash самостоятельно."
-      sleep 2
-      exit 1
     fi
-  elif [ "$kernel" = "Darwin" ]; then
-    echo "macOS не поддерживается на данный момент."
-    exit 1
-  else
-    echo "Неизвестная ОС: $kernel"
-    echo "Установите git и bash самостоятельно."
-    sleep 2
-    exit 1
-  fi
 }
 
 # Проверка на файловую систему только для чтения
 if [ "$(awk '$2 == "/" {print $4}' /proc/mounts)" = "ro" ]; then
-  echo "Файловая система только для чтения, не могу продолжать."
-  exit 1
+    echo "Файловая система только для чтения, не могу продолжать."
+    exit 1
 fi
 
-# Проверка на Termux: sudo/doas не нужны
+# Проверка на Termux или root-доступ
 if [ -n "$TERMUX_VERSION" ]; then
-  SUDO=""
-else
-  if [ "$(id -u)" -eq 0 ]; then
     SUDO=""
-  else
-    if command -v sudo >/dev/null 2>&1; then
-      SUDO="sudo"
-    elif command -v doas >/dev/null 2>&1; then
-      SUDO="doas"
+else
+    if [ "$(id -u)" -eq 0 ]; then
+        SUDO=""
     else
-      echo "Скрипт не может быть выполнен не от имени суперпользователя."
-      exit 1
+        if command -v tsu > /dev/null 2>&1; then
+            SUDO="tsu"
+        elif command -v sudo > /dev/null 2>&1; then
+            SUDO="sudo"
+        elif command -v doas > /dev/null 2>&1; then
+            SUDO="doas"
+        else
+            echo "Скрипт не может быть выполнен не от имени суперпользователя."
+            exit 1
+        fi
     fi
-  fi
 fi
 
 # Установка git, если не установлен
-if ! command -v git >/dev/null 2>&1; then
-  install_dependencies
+if ! command -v git > /dev/null 2>&1; then
+    install_dependencies
 fi
 
 # Определение пути для Termux или стандартной системы
 if [ -n "$TERMUX_VERSION" ]; then
-  INSTALL_DIR="$PREFIX/opt/zapret.installer"
+    INSTALL_DIR="$PREFIX/opt/zapret.installer"
 else
-  INSTALL_DIR="/opt/zapret.installer"
+    INSTALL_DIR="/opt/zapret.installer"
 fi
 
 # Клонирование или обновление репозитория
 if [ ! -d "$INSTALL_DIR" ]; then
-  $SUDO git clone https://github.com/Snowy-Fluffy/zapret.installer.git "$INSTALL_DIR"
-else
-  cd "$INSTALL_DIR" || exit
-  if ! $SUDO git pull; then
-    echo "Ошибка при обновлении. Удаляю репозиторий и клонирую заново..."
-    $SUDO rm -rf "$INSTALL_DIR"
     $SUDO git clone https://github.com/Snowy-Fluffy/zapret.installer.git "$INSTALL_DIR"
-  fi
+else
+    cd "$INSTALL_DIR" || exit
+    if ! $SUDO git pull; then
+        echo "Ошибка при обновлении. Удаляю репозиторий и клонирую заново..."
+        $SUDO rm -rf "$INSTALL_DIR"
+        $SUDO git clone https://github.com/Snowy-Fluffy/zapret.installer.git "$INSTALL_DIR"
+    fi
+fi
+
+# Исправление путей в zapret-control.sh для Termux
+if [ -n "$TERMUX_VERSION" ]; then
+    sed -i 's|/opt/zapret.installer/files/|$PREFIX/opt/zapret.installer/files/|g' "$INSTALL_DIR/zapret-control.sh"
 fi
 
 # Установка прав на выполнение
