@@ -9,7 +9,7 @@ install_dependencies() {
         # Проверка на Termux
         if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ -x "$PREFIX/bin/pkg" ]; then
             echo "Обнаружен Termux (Android)"
-            pkg update -y && pkg install -y git bash
+            pkg update -y && pkg install -y git bash curl iptables
             return
         fi
 
@@ -64,9 +64,14 @@ if ! { [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; }; then
     fi
 fi
 
-# Определение SUDO (не нужно в Termux)
+# Определение SUDO
 if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
-    SUDO=""  # Termux всегда без root
+    # Termux: сначала пробуем su
+    if command -v su > /dev/null 2>&1; then
+        SUDO="su -c"
+    else
+        SUDO=""
+    fi
 else
     if [ "$(id -u)" -eq 0 ]; then
         SUDO=""
@@ -75,6 +80,8 @@ else
             SUDO="sudo"
         elif command -v doas > /dev/null 2>&1; then
             SUDO="doas"
+        elif command -v su > /dev/null 2>&1; then
+            SUDO="su -c"
         else
             echo "Скрипт не может быть выполнен не от имени суперпользователя."
             exit 1
@@ -89,6 +96,10 @@ fi
 # В Termux ставим в $HOME, в Linux — в /opt
 if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
     INSTALL_DIR="$HOME/zapret.installer"
+    # Делаем симлинк для совместимости
+    if [ ! -e "/opt/zapret.installer" ]; then
+        $SUDO "mkdir -p /opt && ln -s $INSTALL_DIR /opt/zapret.installer"
+    fi
 else
     INSTALL_DIR="/opt/zapret.installer"
 fi
